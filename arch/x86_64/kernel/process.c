@@ -375,6 +375,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long rsp,
 
 	*childregs = *regs;
 
+	// rax赋值为0，这就是clone/fork系统调用时子进程的返回值
 	childregs->rax = 0;
 	childregs->rsp = rsp;
 	if (rsp == ~0UL) {

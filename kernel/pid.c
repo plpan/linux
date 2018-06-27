@@ -51,6 +51,8 @@ int pid_max_max = PID_MAX_LIMIT;
  * first use and are never deallocated. This way a low pid_max
  * value does not cause lots of bitmaps to be allocated, but
  * the scheme scales to up to 4 million PIDs, runtime.
+ * 
+ * 初始page为NULL，当第一次使用时分配一个页，并且不会被回收
  */
 typedef struct pidmap {
 	atomic_t nr_free;

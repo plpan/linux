@@ -1149,6 +1149,8 @@ void fastcall sched_fork(task_t *p)
 	 * inserted it onto the runqueue yet. This guarantees that
 	 * nobody will actually run it, and a signal or other external
 	 * event cannot wake it up and insert it on the runqueue either.
+	 * 
+	 * 进程状态设置为TASK_RUNNING
 	 */
 	p->state = TASK_RUNNING;
 	INIT_LIST_HEAD(&p->run_list);
@@ -1163,6 +1165,8 @@ void fastcall sched_fork(task_t *p)
 	 * schedule_tail drops. (in the common case it's this_rq()->lock,
 	 * but it also can be p->switch_lock.) So we compensate with a count
 	 * of 1. Also, we want to start with kernel preemption disabled.
+	 * 
+	 * 禁止抢占
 	 */
 	p->thread_info->preempt_count = 1;
 #endif
@@ -1170,6 +1174,8 @@ void fastcall sched_fork(task_t *p)
 	 * Share the timeslice between parent and child, thus the
 	 * total amount of pending timeslices in the system doesn't change,
 	 * resulting in more scheduling fairness.
+	 * 
+	 * 时间片在父子进程之间共享
 	 */
 	local_irq_disable();
 	p->time_slice = (current->time_slice + 1) >> 1;
@@ -1227,6 +1233,8 @@ void fastcall wake_up_new_task(task_t * p, unsigned long clone_flags)
 	p->prio = effective_prio(p);
 
 	if (likely(cpu == this_cpu)) {
+		// 父子进程在同一个cpu上，并且不共享页表，那么将子进程插入到父进程队列，并且要在父进程前面，子进程优先获得调度
+		// 子进程一般接着会执行exec，这样就避免了写时复制的开销
 		if (!(clone_flags & CLONE_VM)) {
 			/*
 			 * The VM isn't cloned, so we're in a good position to
@@ -1244,6 +1252,7 @@ void fastcall wake_up_new_task(task_t * p, unsigned long clone_flags)
 			}
 			set_need_resched();
 		} else
+			// 否则就将子进程插入到父进程的队列尾部
 			/* Run child last */
 			__activate_task(p, rq);
 		/*

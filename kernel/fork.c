@@ -138,16 +138,19 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	prepare_to_copy(orig);
 
+	// 分配进程描述符
 	tsk = alloc_task_struct();
 	if (!tsk)
 		return NULL;
 
+	// 分配thread_info内存空间
 	ti = alloc_thread_info(tsk);
 	if (!ti) {
 		free_task_struct(tsk);
 		return NULL;
 	}
 
+	// 把current进程相关信息保存到tsk和ti中，并将tsk引用计数改为2，最后返回新的进程描述符tsk
 	*ti = *orig->thread_info;
 	*tsk = *orig;
 	tsk->thread_info = ti;
@@ -794,12 +797,15 @@ static task_t *copy_process(unsigned long clone_flags,
 	int retval;
 	struct task_struct *p = NULL;
 
+	// CLONE_NEWNS和CLONE_FS不能同时设置
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
 
 	/*
 	 * Thread groups must share signals as well, and detached threads
 	 * can only be started up within the thread group.
+	 * 
+	 * 如果设置了CLONE_THREAD，CLONE_SIGHAND也必须设置
 	 */
 	if ((clone_flags & CLONE_THREAD) && !(clone_flags & CLONE_SIGHAND))
 		return ERR_PTR(-EINVAL);
@@ -808,20 +814,25 @@ static task_t *copy_process(unsigned long clone_flags,
 	 * Shared signal handlers imply shared VM. By way of the above,
 	 * thread groups also imply shared VM. Blocking this case allows
 	 * for various simplifications in other code.
+	 * 
+	 * 如果设置了CLONE_SIGHAND，CLONE_VM也必须设置
 	 */
 	if ((clone_flags & CLONE_SIGHAND) && !(clone_flags & CLONE_VM))
 		return ERR_PTR(-EINVAL);
 
+	// 附加安全检查：执行扩展安全性的钩子函数
 	retval = security_task_create(clone_flags);
 	if (retval)
 		goto fork_out;
 
 	retval = -ENOMEM;
+	// 获取子进程描述符
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
 
 	retval = -EAGAIN;
+	// 进程数校验
 	if (atomic_read(&p->user->processes) >=
 			p->signal->rlim[RLIMIT_NPROC].rlim_cur) {
 		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_RESOURCE) &&
@@ -837,6 +848,8 @@ static task_t *copy_process(unsigned long clone_flags,
 	 * If multiple threads are within copy_process(), then this check
 	 * triggers too late. This doesn't hurt, the check is only there
 	 * to stop root fork bombs.
+	 * 
+	 * 控制进程数
 	 */
 	if (nr_threads >= max_threads)
 		goto bad_fork_cleanup_count;
@@ -847,16 +860,19 @@ static task_t *copy_process(unsigned long clone_flags,
 	if (p->binfmt && !try_module_get(p->binfmt->module))
 		goto bad_fork_cleanup_put_domain;
 
-	p->did_exec = 0;
-	copy_flags(clone_flags, p);
-	p->pid = pid;
+	// 关键字段设置
+	p->did_exec = 0;			// 记录execve系统调用的次数
+	copy_flags(clone_flags, p);	// 标识设置
+	p->pid = pid;				// 保存pid
 	retval = -EFAULT;
+	// 如果CLONE_PARENT_SETTID设置，将子进程pid拷贝至parent_tidptr
 	if (clone_flags & CLONE_PARENT_SETTID)
 		if (put_user(p->pid, parent_tidptr))
 			goto bad_fork_cleanup;
 
 	p->proc_dentry = NULL;
 
+	// 相关字段初始化：list_head，自旋锁，挂起信号、定时器，时间统计表等
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
 	p->vfork_done = NULL;
@@ -898,6 +914,7 @@ static task_t *copy_process(unsigned long clone_flags,
  	}
 #endif
 
+	// tgid设置，如果设置了CLONE_THREAD标识，tgid使用父进程的tgid，否则使用子进程的pid
 	p->tgid = p->pid;
 	if (clone_flags & CLONE_THREAD)
 		p->tgid = current->tgid;
@@ -907,6 +924,7 @@ static task_t *copy_process(unsigned long clone_flags,
 	if ((retval = audit_alloc(p)))
 		goto bad_fork_cleanup_security;
 	/* copy all the process information */
+	// 根据标识来决定，子进程的相关数据结构是重新分配生成，还是和父进程共享一个
 	if ((retval = copy_semundo(clone_flags, p)))
 		goto bad_fork_cleanup_audit;
 	if ((retval = copy_files(clone_flags, p)))
@@ -923,6 +941,7 @@ static task_t *copy_process(unsigned long clone_flags,
 		goto bad_fork_cleanup_mm;
 	if ((retval = copy_namespace(clone_flags, p)))
 		goto bad_fork_cleanup_keys;
+	// 使用clone系统调用时CPU寄存器的值来初始化子进程的内核堆栈
 	retval = copy_thread(0, clone_flags, stack_start, stack_size, p, regs);
 	if (retval)
 		goto bad_fork_cleanup_namespace;
@@ -936,6 +955,8 @@ static task_t *copy_process(unsigned long clone_flags,
 	/*
 	 * Syscall tracing should be turned off in the child regardless
 	 * of CLONE_PTRACE.
+	 * 
+	 * 清楚子进程的TIF_SYSCALL_TRACE标识
 	 */
 	clear_tsk_thread_flag(p, TIF_SYSCALL_TRACE);
 
@@ -950,6 +971,7 @@ static task_t *copy_process(unsigned long clone_flags,
 	p->exit_state = 0;
 
 	/* Perform scheduler related setup */
+	// 对新进程调度程序数据结构进行初始化
 	sched_fork(p);
 
 	/*
@@ -969,6 +991,8 @@ static task_t *copy_process(unsigned long clone_flags,
 	 * changed after it was copied first time, and it may then move to
 	 * another CPU - so we re-copy it here and set the child's CPU to
 	 * the parent's CPU. This avoids alot of nasty races.
+	 * 
+	 * thread_info->cpu 设置为本地CPU
 	 */
 	p->cpus_allowed = current->cpus_allowed;
 	set_task_cpu(p, smp_processor_id());
@@ -984,6 +1008,8 @@ static task_t *copy_process(unsigned long clone_flags,
 	}
 
 	/* CLONE_PARENT re-uses the old parent */
+	// 亲子关系初始化：CLONE_PARENT或CLONE_THREAD被设置，则将子进程的父进程初始化为当前进程（父进程）的父进程
+	// 否则就将子进程的父进程初始化为当前进程（父进程）
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD))
 		p->real_parent = current->real_parent;
 	else
@@ -1018,12 +1044,16 @@ static task_t *copy_process(unsigned long clone_flags,
 		spin_unlock(&current->sighand->siglock);
 	}
 
+	// 将新进程描述符插入进程链表
 	SET_LINKS(p);
+	// 子进程跟踪相关处理
 	if (unlikely(p->ptrace & PT_PTRACED))
 		__ptrace_link(p, current->parent);
 
+	// 子进程描述符的pid插入pid_hash散列表中
 	attach_pid(p, PIDTYPE_PID, p->pid);
 	attach_pid(p, PIDTYPE_TGID, p->tgid);
+	// 如果子进程时进程组的领头进程，将子进程pid插入pgid、sid散列表
 	if (thread_group_leader(p)) {
 		attach_pid(p, PIDTYPE_PGID, process_group(p));
 		attach_pid(p, PIDTYPE_SID, p->signal->session);
@@ -1031,6 +1061,7 @@ static task_t *copy_process(unsigned long clone_flags,
 			__get_cpu_var(process_counts)++;
 	}
 
+	// 新进程添加成功，自增nr_threads和total_forks
 	nr_threads++;
 	total_forks++;
 	write_unlock_irq(&tasklist_lock);
@@ -1039,6 +1070,7 @@ static task_t *copy_process(unsigned long clone_flags,
 fork_out:
 	if (retval)
 		return ERR_PTR(retval);
+	// 返回dup_task_struct创建的tsk进程描述符
 	return p;
 
 bad_fork_cleanup_namespace:
@@ -1120,20 +1152,24 @@ static inline int fork_traceflag (unsigned clone_flags)
  *
  * It copies the process, and if successful kick-starts
  * it and waits for it to finish using the VM if required.
+ * 
+ * 处理clone、fork、vfork系统调用
  */
-long do_fork(unsigned long clone_flags,
-	      unsigned long stack_start,
-	      struct pt_regs *regs,
-	      unsigned long stack_size,
-	      int __user *parent_tidptr,
-	      int __user *child_tidptr)
+long do_fork(unsigned long clone_flags,	// 低字节存储信号代码，其余字节存储标志位
+	      unsigned long stack_start,	// 用户态堆栈指针，分配给子进程esp寄存器
+	      struct pt_regs *regs,			// 指向通用寄存器的指针
+	      unsigned long stack_size,		// 未使用，值为0
+	      int __user *parent_tidptr,	// 父进程的用户态变量地址，仅在CLONE_PARENT_SETTID时有效
+	      int __user *child_tidptr)		// 子进程的用户态变量地址，尽在CLONE_CHILD_SETTID时有效
 {
 	struct task_struct *p;
 	int trace = 0;
+	// 从上一次分配的pid开始遍历位图，找到第一个可用的id作为本进程pid
 	long pid = alloc_pidmap();
 
 	if (pid < 0)
 		return -EAGAIN;
+	// 根据父进程是否被跟踪，决定本进程是否需要被跟踪 
 	if (unlikely(current->ptrace)) {
 		trace = fork_traceflag (clone_flags);
 		if (trace)
@@ -1153,6 +1189,7 @@ long do_fork(unsigned long clone_flags,
 			init_completion(&vfork);
 		}
 
+		// 如果子进程需要被跟踪，增加挂起信号
 		if ((p->ptrace & PT_PTRACED) || (clone_flags & CLONE_STOPPED)) {
 			/*
 			 * We'll start up with an immediate SIGSTOP.
@@ -1161,6 +1198,7 @@ long do_fork(unsigned long clone_flags,
 			set_tsk_thread_flag(p, TIF_SIGPENDING);
 		}
 
+		// 否则执行调度相关操作
 		if (!(clone_flags & CLONE_STOPPED))
 			wake_up_new_task(p, clone_flags);
 		else
@@ -1171,6 +1209,7 @@ long do_fork(unsigned long clone_flags,
 			ptrace_notify ((trace << 8) | SIGTRAP);
 		}
 
+		// 如果设置了CLONE_VFORK标识，则需要把父进程插入等待队列，并挂起等待子进程释放自己的内存空间（子进程退出或执行新的程序）
 		if (clone_flags & CLONE_VFORK) {
 			wait_for_completion(&vfork);
 			if (unlikely (current->ptrace & PT_TRACE_VFORK_DONE))
