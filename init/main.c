@@ -366,6 +366,8 @@ static void __init smp_init(void)
  * cpu_idle.
  *
  * gcc-3.4 accidentally inlines this function, so use noinline.
+ * 
+ * 创建内核线程1 - init进程
  */
 
 static void noinline rest_init(void)
@@ -411,8 +413,12 @@ void __init parse_early_param(void)
 
 /*
  *	Activate the first processor.
+ *
+ * 启动内核，初始化进程0（idle进程，或者叫swapper进程）所需要的所有数据结构，然后创建init进程（进程号为1）
+ * 		这里是通过调用kernel_thread来创建的，与进程0共享所有的数据结构，然后init进程开始执行init内核函数
+ * 本质上，每一个CPU都有一个进程0：BIOS启动时，会选择一个CPU，并禁用其他CPU，等该CPU完成swapper进程之后，通过
+ * copy_process创建其他的swapper进程，并将0传递给新进程作为它们的进程ID
  */
-
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;

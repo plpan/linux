@@ -1154,6 +1154,13 @@ static inline int fork_traceflag (unsigned clone_flags)
  * it and waits for it to finish using the VM if required.
  * 
  * 处理clone、fork、vfork系统调用
+ * 
+ * do_fork执行完毕之后，子进程实际上还没有运行，何时运行有调度算法决定
+ * 调度程序会逐步将子进程的thread字段值填充到CPU寄存器中：
+ * 		thread.rsp填充到rsp寄存器
+ * 		把ret_from_fork返回地址填充到rip寄存器
+ * ret_from_fork函数调用schedule_tail函数完成进程切换，用存放在栈中的值来填充所有寄存器，强迫CPU返回值用户态
+ * 这样在fork、vfork、clone系统调用结束时，新的进程将开始执行，并且系统调用返回值为0
  */
 long do_fork(unsigned long clone_flags,	// 低字节存储信号代码，其余字节存储标志位
 	      unsigned long stack_start,	// 用户态堆栈指针，分配给子进程esp寄存器

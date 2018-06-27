@@ -24,6 +24,8 @@ EXPORT_SYMBOL(init_mm);
  * We need to make sure that this is 8192-byte aligned due to the
  * way process stacks are handled. This is done by having a special
  * "init_task" linker map entry..
+ * 
+ * 存放进程0的thread_info描述符和内核堆栈
  */
 union thread_union init_thread_union 
 	__attribute__((__section__(".data.init_task"))) =
@@ -33,6 +35,8 @@ union thread_union init_thread_union
  * Initial task structure.
  *
  * All other task structs will be allocated on slabs in fork.c
+ * 
+ * 进程0的进程描述符，通过INIT_TASK初始化
  */
 struct task_struct init_task = INIT_TASK(init_task);
 

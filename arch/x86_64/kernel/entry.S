@@ -717,6 +717,9 @@ bad_gs:
  *
  * asm input arguments:
  *	rdi: fn, rsi: arg, rdx: flags
+ *
+ * 创建内核线程，本质上还是调用do_fork函数，需要传递的参数有：执行的内核函数地址、传递给函数的参数，以及一组标识位
+ *		init、keventd、kapmd、kswapd等进程都是调用kernel_thread来创建的
  */
 ENTRY(kernel_thread)
 	CFI_STARTPROC
