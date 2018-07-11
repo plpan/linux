@@ -526,56 +526,79 @@ struct audit_context;		/* See audit.c */
 struct mempolicy;
 
 struct task_struct {
+    // 进程状态：TASK_RUNNING, TASK_INTERRUPTIBLE, TASK_UNINTERRUPTIBLE, TASK_STOPPED, TASK_ZOMBIE and TASK_DEAD
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	struct thread_info *thread_info;
+    // 引用计数
 	atomic_t usage;
+    // 进程标志位，具体状态定义在下面 PF_XXX
 	unsigned long flags;	/* per process flags, defined below */
+    // 用于ptrace系统调用，允许父进程调试子进程
 	unsigned long ptrace;
 
+    // 用于SMP体系结构下的big kernel lock
 	int lock_depth;		/* Lock depth */
 
+    // 进程调度优先级
 	int prio, static_prio;
+    // runnable进程链表
 	struct list_head run_list;
+    // 优先级数组 TODO: 干吗用的
 	prio_array_t *array;
 
+    // 平均睡眠时间
 	unsigned long sleep_avg;
+    // 已运行时间，主要用来调整优先级；上一次运行时间
 	unsigned long long timestamp, last_ran;
 	int activated;
 
+    // 进程调度策略：SCHED_NORMAL, SCHED_FIFO, SCHED_RR
 	unsigned long policy;
+    // 记录本进程可以在那些CPU上运行，CPU亲和度设置
 	cpumask_t cpus_allowed;
+    // 进程可以运行多长时间
 	unsigned int time_slice, first_time_slice;
 
 #ifdef CONFIG_SCHEDSTATS
 	struct sched_info sched_info;
 #endif
 
+    // 任务的双向链表
 	struct list_head tasks;
 	/*
 	 * ptrace_list/ptrace_children forms the list of my children
 	 * that were stolen by a ptracer.
+     * 跟踪的子进程列表
 	 */
 	struct list_head ptrace_children;
+    // 正在跟踪本进程的父进程列表
 	struct list_head ptrace_list;
 
+    // 进城地址空间；进程活跃的地址空间
 	struct mm_struct *mm, *active_mm;
 
 /* task state */
 	struct linux_binfmt *binfmt;
+    // 返回状态码：SIGHUP, SIGINT, SIGQUIT, ...
 	long exit_state;
 	int exit_code, exit_signal;
+    // 父进程死亡时发送的信号
 	int pdeath_signal;  /*  The signal sent when the parent dies  */
 	/* ??? */
 	unsigned long personality;
+    // 调用sys_execve()时设置为1
 	unsigned did_exec:1;
+    // 进程id
 	pid_t pid;
+    // 线程组id
 	pid_t tgid;
-	/* 
+	/*
 	 * pointers to (original) parent process, youngest child, younger sibling,
-	 * older sibling, respectively.  (p->father can be replaced with 
+	 * older sibling, respectively.  (p->father can be replaced with
 	 * p->parent->pid)
 	 */
 	struct task_struct *real_parent; /* real parent process (when being debugged) */
+    // 父进程描述符
 	struct task_struct *parent;	/* parent process */
 	/*
 	 * children/sibling forms the list of my children plus the
@@ -583,31 +606,40 @@ struct task_struct {
 	 */
 	struct list_head children;	/* list of my children */
 	struct list_head sibling;	/* linkage in my parent's children list */
+    // 线程组leader进程描述符
 	struct task_struct *group_leader;	/* threadgroup leader */
 
 	/* PID/PID hash table linkage. */
+    // PID哈希表，根据进程PID快速定位进程描述符
 	struct pid pids[PIDTYPE_MAX];
 
 	struct completion *vfork_done;		/* for vfork() */
 	int __user *set_child_tid;		/* CLONE_CHILD_SETTID */
 	int __user *clear_child_tid;		/* CLONE_CHILD_CLEARTID */
 
+    // 实时优先级 real-time priority
 	unsigned long rt_priority;
+    // 当前定时器的值
 	unsigned long it_real_value, it_real_incr;
 	cputime_t it_virt_value, it_virt_incr;
 	cputime_t it_prof_value, it_prof_incr;
+    // 一个周期性定时器
 	struct timer_list real_timer;
 	cputime_t utime, stime;
 	unsigned long nvcsw, nivcsw; /* context switch counts */
+    // 进程启动时间
 	struct timespec start_time;
 /* mm fault and swap info: this can arguably be seen as either mm-specific or thread-specific */
+    // minor fault, major fault
 	unsigned long min_flt, maj_flt;
 /* process credentials */
+    // 各类身份id
 	uid_t uid,euid,suid,fsuid;
 	gid_t gid,egid,sgid,fsgid;
 	struct group_info *group_info;
 	kernel_cap_t   cap_effective, cap_inheritable, cap_permitted;
 	unsigned keep_capabilities:1;
+    // 进程所属用户信息
 	struct user_struct *user;
 #ifdef CONFIG_KEYS
 	struct key *session_keyring;	/* keyring inherited over fork */
@@ -615,9 +647,14 @@ struct task_struct {
 	struct key *thread_keyring;	/* keyring private to this thread */
 #endif
 	int oomkilladj; /* OOM kill score adjustment (bit shift). */
+    // 命令名称
 	char comm[TASK_COMM_LEN];
 /* file system info */
+    // 符号链接数量
 	int link_count, total_link_count;
+    /**
+     * 核心存储：CPU状态、文件系统、文件描述符、信号、信号处理函数
+     */
 /* ipc stuff */
 	struct sysv_sem sysvsem;
 /* CPU-specific state of this task */
@@ -632,7 +669,9 @@ struct task_struct {
 	struct signal_struct *signal;
 	struct sighand_struct *sighand;
 
+    // 屏蔽的信号
 	sigset_t blocked, real_blocked;
+    // 待处理信号
 	struct sigpending pending;
 
 	unsigned long sas_ss_sp;
@@ -640,13 +679,14 @@ struct task_struct {
 	int (*notifier)(void *priv);
 	void *notifier_data;
 	sigset_t *notifier_mask;
-	
+
 	void *security;
 	struct audit_context *audit_context;
 
 /* Thread group tracking */
    	u32 parent_exec_id;
    	u32 self_exec_id;
+    // 各种用途的锁，分别用于守护不同的场景
 /* Protection of (de-)allocation: mm, files, fs, tty, keyrings */
 	spinlock_t alloc_lock;
 /* Protection of proc_dentry: nesting proc_lock, dcache_lock, write_lock_irq(&tasklist_lock); */
@@ -872,7 +912,7 @@ static inline int dequeue_signal_lock(struct task_struct *tsk, sigset_t *mask, s
 	spin_unlock_irqrestore(&tsk->sighand->siglock, flags);
 
 	return ret;
-}	
+}
 
 extern void block_all_signals(int (*notifier)(void *priv), void *priv,
 			      sigset_t *mask);
@@ -1091,7 +1131,7 @@ static inline int signal_pending(struct task_struct *p)
 {
 	return unlikely(test_tsk_thread_flag(p,TIF_SIGPENDING));
 }
-  
+
 static inline int need_resched(void)
 {
 	return unlikely(test_thread_flag(TIF_NEED_RESCHED));
