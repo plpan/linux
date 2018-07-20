@@ -190,23 +190,24 @@ struct prio_array {
 
 /*
  * This is the main, per-CPU runqueue data structure.
+ * 每个CPU都有自己的runqueue数据结构，this_rq()函数产生本地CPU运行队列的地址
  *
  * Locking rule: those places that want to lock multiple runqueues
  * (such as the load balancing or the thread migration code), lock
  * acquire operations must be ordered by ascending &runqueue.
  */
 struct runqueue {
-	spinlock_t lock;
+	spinlock_t lock; // 保护进程链表的自旋锁
 
 	/*
 	 * nr_running and cpu_load should be in the same cacheline because
 	 * remote CPUs use both these fields when doing load calculation.
 	 */
-	unsigned long nr_running;
+	unsigned long nr_running; // 运行队列链表中可运行进程数目
 #ifdef CONFIG_SMP
-	unsigned long cpu_load;
+	unsigned long cpu_load; // 基于运行队列中进程平均数量的负载因子
 #endif
-	unsigned long long nr_switches;
+	unsigned long long nr_switches; // CPU执行进程切换的次数
 
 	/*
 	 * This is part of a global counter where only the total sum
@@ -214,25 +215,25 @@ struct runqueue {
 	 * one CPU and if it got migrated afterwards it may decrease
 	 * it on another CPU. Always updated under the runqueue lock:
 	 */
-	unsigned long nr_uninterruptible;
+	unsigned long nr_uninterruptible; // 之前在运行队列，而现在睡眠在TASK_INTERRUPTIBLE状态的进程数量
 
-	unsigned long expired_timestamp;
-	unsigned long long timestamp_last_tick;
-	task_t *curr, *idle;
-	struct mm_struct *prev_mm;
-	prio_array_t *active, *expired, arrays[2];
-	int best_expired_prio;
-	atomic_t nr_iowait;
+	unsigned long expired_timestamp; // 过期队列中最老的进程被插入队列的时间
+	unsigned long long timestamp_last_tick; // 最近一次定时器中断的时间戳
+	task_t *curr, *idle; // curr: 当前正在运行的进程描述符指针， idle: 当前CPU上swapper进程的进程描述符指针
+	struct mm_struct *prev_mm; // 在进程切换期间，用来存放被替换进程内存描述符的地址
+	prio_array_t *active, *expired, arrays[2]; // 指向活动进程/过期进程的指针及两种进程类型的集合
+	int best_expired_prio; // 过期进程中静态优先级最高的进程(值最小)
+	atomic_t nr_iowait; // 之前在运行队列链表，而现在在等待磁盘I/O操作结束的进程的数量
 
 #ifdef CONFIG_SMP
-	struct sched_domain *sd;
+	struct sched_domain *sd; // 指向当前CPU的基本调度域
 
 	/* For active balancing */
-	int active_balance;
+	int active_balance; // 如果要平衡运行队列，把一些进程从本地运行队列迁移至其他运行队列，就需要设置本标志
 	int push_cpu;
 
-	task_t *migration_thread;
-	struct list_head migration_queue;
+	task_t *migration_thread; // 迁移内核线程的进程描述符指针
+	struct list_head migration_queue; // 从运行队列中被删除的进程的链表
 #endif
 
 #ifdef CONFIG_SCHEDSTATS
