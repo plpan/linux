@@ -182,10 +182,14 @@ static unsigned int task_timeslice(task_t *p)
 
 typedef struct runqueue runqueue_t;
 
+/**
+ * 注意runqueue中active和epired指针交替指向arrays[2]的两个对象
+ * 进程会从活动进程队列迁移至过期进程队列，如果当前没有活动进程，则交换两者指针
+ */
 struct prio_array {
-	unsigned int nr_active;
-	unsigned long bitmap[BITMAP_SIZE];
-	struct list_head queue[MAX_PRIO];
+	unsigned int nr_active; // 活跃进程数
+	unsigned long bitmap[BITMAP_SIZE]; // 优先级位图
+	struct list_head queue[MAX_PRIO]; // 进程优先级队列双向链表（共140级）
 };
 
 /*
