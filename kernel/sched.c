@@ -1180,13 +1180,15 @@ void fastcall sched_fork(task_t *p)
 	 * total amount of pending timeslices in the system doesn't change,
 	 * resulting in more scheduling fairness.
 	 * 
-	 * 时间片在父子进程之间共享
+	 * 时间片在父子进程之间共享，也就是创建新进程不会增加时间片，避免无线获得时间片的问题
 	 */
 	local_irq_disable();
 	p->time_slice = (current->time_slice + 1) >> 1;
 	/*
 	 * The remainder of the first timeslice might be recovered by
 	 * the parent if the child exits early enough.
+	 * 
+	 * 如果子进程在第一个时间片内结束，则把子进程剩余时间片在还给父进程
 	 */
 	p->first_time_slice = 1;
 	current->time_slice >>= 1;
@@ -1196,6 +1198,9 @@ void fastcall sched_fork(task_t *p)
 		 * This case is rare, it happens when the parent has only
 		 * a single jiffy left from its timeslice. Taking the
 		 * runqueue lock is not a problem.
+		 * 
+		 * 如果父进程仅有1个时间片，他创建子进程之后，时间片就变为0
+		 * 这里还是把父进程的时间片恢复成1
 		 */
 		current->time_slice = 1;
 		preempt_disable();
@@ -2422,6 +2427,8 @@ void account_steal_time(struct task_struct *p, cputime_t steal)
  *
  * It also gets called by the fork code, when changing the parent's
  * timeslices.
+ * 
+ * 获取当前最新的time_slice计数器：用于1）定时器，2）创建子进程
  */
 void scheduler_tick(void)
 {

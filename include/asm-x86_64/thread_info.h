@@ -24,11 +24,11 @@ struct exec_domain;
 #include <asm/mmsegment.h>
 
 struct thread_info {
-	struct task_struct	*task;		/* main task structure */
+	struct task_struct	*task;		/* main task structure */  // 指向进程描述符
 	struct exec_domain	*exec_domain;	/* execution domain */
-	__u32			flags;		/* low level flags */
+	__u32			flags;		/* low level flags */          // 线程标志，如需调度，则设置TIF_NEED_RESCHED
 	__u32			status;		/* thread synchronous flags */
-	__u32			cpu;		/* current CPU */
+	__u32			cpu;		/* current CPU */              // 逻辑CPU标号
 	int 			preempt_count;
 
 	mm_segment_t		addr_limit;	

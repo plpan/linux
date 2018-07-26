@@ -541,15 +541,16 @@ struct task_struct {
 
     // 进程调度优先级
 	int prio, static_prio;
-    // runnable进程链表
+    // runnable进程链表，指向进程所属运行队列链表中下一个和前一个元素
 	struct list_head run_list;
-    // 优先级数组 TODO: 干吗用的
+    // 指向包含运行进程的集合，是个优先级数组，共调度器调度进程使用
 	prio_array_t *array;
 
     // 平均睡眠时间
 	unsigned long sleep_avg;
     // 已运行时间，主要用来调整优先级；上一次运行时间
 	unsigned long long timestamp, last_ran;
+	// 进程被唤醒时，使用的条件代码
 	int activated;
 
     // 进程调度策略：SCHED_NORMAL, SCHED_FIFO, SCHED_RR
