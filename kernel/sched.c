@@ -2436,20 +2436,29 @@ void scheduler_tick(void)
 	runqueue_t *rq = this_rq();
 	task_t *p = current;
 
+	// 将TSC（单位纳秒）存入本地运行队列
 	rq->timestamp_last_tick = sched_clock();
 
+	// 检查是否为swapper进程，如果是，就调用rebalance_tick
 	if (p == rq->idle) {
+		// 检查是否包含其他可运行进程，如果有就设置TIF_NEED_RESCHED标志，强迫内核进行调度
 		if (wake_priority_sleeper(rq))
 			goto out;
+		// 保证各CPU拥有大致相同数量的可运行进程
 		rebalance_tick(cpu, rq, SCHED_IDLE);
 		return;
 	}
 
-	/* Task might have expired already, but not scheduled off yet */
+	/* 
+	 * Task might have expired already, but not scheduled off yet
+	 * 
+	 * 检查current->array是否指向活动进程列表，如果不是，说明进程都已经过期，但是还没有被替换
+	 */
 	if (p->array != rq->active) {
 		set_tsk_need_resched(p);
 		goto out;
 	}
+	// 获取自旋锁
 	spin_lock(&rq->lock);
 	/*
 	 * The task was running during this tick - update the
@@ -2457,31 +2466,53 @@ void scheduler_tick(void)
 	 * priority until it either goes to sleep or uses up its
 	 * timeslice. This makes it possible for interactive tasks
 	 * to use up their timeslices at their highest priority levels.
+	 * 
+	 * 是否是实时进程，如果是FIFO的实时进程，则什么都不用处理，因为当前进程就是优先级最高的进程
 	 */
 	if (rt_task(p)) {
 		/*
 		 * RR tasks need a special form of timeslice management.
 		 * FIFO tasks have no timeslices.
+		 * 
+		 * 如果是基于时间片轮转的进程，则递减时间片，
+		 * 如果当前时间片已经为0，则重新分配时间片，
+		 * 如果必要的话，允许内核抢占
 		 */
 		if ((p->policy == SCHED_RR) && !--p->time_slice) {
 			p->time_slice = task_timeslice(p);
 			p->first_time_slice = 0;
 			set_tsk_need_resched(p);
 
-			/* put it at the end of the queue: */
+			/* 
+			 * put it at the end of the queue:
+			 * 
+			 * 将当前进程挪至活动进程队列的尾部，保证相同优先级的进程都能被执行
+			 */
 			requeue_task(p, rq->active);
 		}
 		goto out_unlock;
 	}
+	// 递减时间片，并检查是否有剩余
 	if (!--p->time_slice) {
+		// 如果时间片已经用完，则从active队列中弹出current进程描述符
 		dequeue_task(p, rq->active);
+		// 设置抢占标志
 		set_tsk_need_resched(p);
+		// 更新动态优先级，根据static_prio和sleep_avg计算
 		p->prio = effective_prio(p);
+		// 重新分配时间片
 		p->time_slice = task_timeslice(p);
 		p->first_time_slice = 0;
 
+		// 如果本地运行队列expired_timestamp为0，就表示过期进程队列为空，就把当前时钟节拍的值赋给它
 		if (!rq->expired_timestamp)
 			rq->expired_timestamp = jiffies;
+		/*
+		 * 将当前进程插入活动进程集合或过期进程集合：条件如下
+		 *  如果判断出当前进程是交互式进程，则TASK_INTERACTIVE返回1
+		 *  如果第一个过期进程的等待时间已经超过1000个时钟节拍乘以活动进程中可运行进程数加1，则EXPIRED_STARVING返回1
+		 *  如果当前进程的静态优先级大于过期进程的静态优先级，则EXPIRED_STARVING也返回1
+		 */
 		if (!TASK_INTERACTIVE(p) || EXPIRED_STARVING(rq)) {
 			enqueue_task(p, rq->expired);
 			if (p->static_prio < rq->best_expired_prio)
@@ -2504,6 +2535,9 @@ void scheduler_tick(void)
 		 *
 		 * This only applies to tasks in the interactive
 		 * delta range with at least TIMESLICE_GRANULARITY to requeue.
+		 * 
+		 * 如果时间片没有用完，检查当前进程剩余时间片是否太长
+		 * 基本上，具有高静态优先级的交互式进程，其时间片会被分成大小为TIMESLICE_GRANULARITY的几个片段，保证CPU不会被独占
 		 */
 		if (TASK_INTERACTIVE(p) && !((task_timeslice(p) -
 			p->time_slice) % TIMESLICE_GRANULARITY(p)) &&
