@@ -722,21 +722,34 @@ static void activate_task(task_t *p, runqueue_t *rq, int local)
 {
 	unsigned long long now;
 
+	// 获取当前时间戳（单位纳秒）
 	now = sched_clock();
 #ifdef CONFIG_SMP
 	if (!local) {
-		/* Compensate for drifting sched_clock */
+		/* 
+		 * Compensate for drifting sched_clock 
+		 * 
+		 * 如果目标CPU不是本地CPU，需要补偿本地始终中断的偏差
+		 * （借助本地CPU和目标CPU上一次始终中断的相对时间戳）
+		 */
 		runqueue_t *this_rq = this_rq();
 		now = (now - this_rq->timestamp_last_tick)
 			+ rq->timestamp_last_tick;
 	}
 #endif
 
+	// 重新计算动态优先级，以及更新进程的平均睡眠时间
 	recalc_task_prio(p, now);
 
 	/*
 	 * This checks to make sure it's not an uninterruptible task
 	 * that is now waking up.
+	 * 
+	 * 设置activated字段
+	 * 0：进程处于TASK_RUNNING
+	 * 1：进程处于TASK_STOPPED或TASK_INTERRUPTIBLE状态，正在被系统调用服务例程或内核线程唤醒
+	 * 2：进程处于TASK_STOPPED或TASK_INTERRUPTIBLE状态，正在被中断处理程序或可延迟函数唤醒
+	 * -1：进程处于TASK_UNINTERRUPTIBLE，并且正在被唤醒
 	 */
 	if (!p->activated) {
 		/*
@@ -756,8 +769,10 @@ static void activate_task(task_t *p, runqueue_t *rq, int local)
 			p->activated = 1;
 		}
 	}
+	// 设置时间戳
 	p->timestamp = now;
 
+	// 将进程描述符插入活动进程集合
 	__activate_task(p, rq);
 }
 
@@ -986,6 +1001,9 @@ static inline int wake_idle(int cpu, task_t *p)
  * runnable without the overhead of this.
  *
  * returns failure only if the task is already active.
+ * 
+ * 把进程状态设置为TASK_RUNNING，并插入本地CPU的运行队列，以唤醒睡眠或停止的进程
+ * 接受参数：1）被唤醒进程的描述符，2）可以被唤醒的进程状态掩码，3）一个标志，可以禁止被唤醒进程抢占当前正在运行的进程
  */
 static int try_to_wake_up(task_t * p, unsigned int state, int sync)
 {
@@ -999,18 +1017,27 @@ static int try_to_wake_up(task_t * p, unsigned int state, int sync)
 	int new_cpu;
 #endif
 
+	// 禁止本地中断，TODO 并获取最后执行进程的CPU所拥有的运行队列的rq锁，这里的CPU可能不同于本地CPU？
 	rq = task_rq_lock(p, &flags);
 	schedstat_inc(rq, ttwu_cnt);
 	old_state = p->state;
+	// 检查进程状态码是否属于参数state状态掩码，如果不是，退出处理
 	if (!(old_state & state))
 		goto out;
 
+	// 如果p->array不为空，则说明p已经属于某个运行队列，则跳转至out_running进行处理
 	if (p->array)
 		goto out_running;
 
+	// 获取CPU逻辑号
 	cpu = task_cpu(p);
 	this_cpu = smp_processor_id();
 
+// 复杂逻辑主要在一下多处理器系统中：主要是检查被唤醒进程是否应该从最近运行的CPU运行队列迁移至另外一个CPU运行队列
+// 原则有：1）如果系统中有CPU空闲，就选择空闲CPU运行队列作为目标（优先选择先前正在执行进程的CPU和本地CPU）
+//        2) 如果先前正在执行进程的CPU负载小于本地CPU负载，则选择先前运行队列作为目标
+//        3）如果进程最近被执行过，就选择老的运行队列作为目标
+// 最后就是把进程移至本地CPU，以缓解CPU之间的不平衡
 #ifdef CONFIG_SMP
 	if (unlikely(task_running(rq, p)))
 		goto out_activate;
@@ -1030,7 +1057,11 @@ static int try_to_wake_up(task_t * p, unsigned int state, int sync)
 	if (sync)
 		this_load -= SCHED_LOAD_SCALE;
 
-	/* Don't pull the task off an idle CPU to a busy one */
+	/* 
+	 * Don't pull the task off an idle CPU to a busy one
+	 * 
+	 * 别拉反了。。。
+	 */
 	if (load < SCHED_LOAD_SCALE/2 && this_load > SCHED_LOAD_SCALE/2)
 		goto out_set_cpu;
 
@@ -1093,6 +1124,7 @@ out_set_cpu:
 
 out_activate:
 #endif /* CONFIG_SMP */
+	// 如果进程处于TASK_UNINTERRUPTIBLE状态，就递减nr_uninterruptible计数器，并将activated置位1
 	if (old_state == TASK_UNINTERRUPTIBLE) {
 		rq->nr_uninterruptible--;
 		/*
@@ -1109,19 +1141,31 @@ out_activate:
 	 * this cpu. (in this case the 'I will reschedule' promise of
 	 * the waker guarantees that the freshly woken up task is going
 	 * to be considered on this CPU.)
+	 * 
+	 * 将进程挪至运行队列，并重新计算其优先级
 	 */
 	activate_task(p, rq, cpu == this_cpu);
+	// 如果CPU不是本地CPU，或者没有设置sync标志位
 	if (!sync || cpu != this_cpu) {
+		// 检查可运行新进程的动态优先级是否比rq运行队列中当前进程的动态优先级高
+		// 如果是，就调用resched_task抢占rq_curr
+		// 在单处理器系统中，它仅是调用set_tsk_need_resched来设置rq->curr进程的TIF_NEED_RESCHED
+		// 在多处理器系统中，它还会检查TIF_NEED_RESCHED旧值是否为0；目标CPU和本地CPU是否不同，rq->curr
+		//    TIF_POLLING_NRFLAG标志是否清0（目标CPU没有轮询进程TIF_NEED_RESCHED标志的值）
+		//    如果条件满足，resched_task将调用smp_send_reschedule，强制目标CPU重新调度
 		if (TASK_PREEMPTS_CURR(p, rq))
 			resched_task(rq->curr);
 	}
 	success = 1;
 
 out_running:
+	// 把进程状态置位TASK_RUNNING
 	p->state = TASK_RUNNING;
 out:
+	// 打开运行队列的rq锁，并打开本地中断
 	task_rq_unlock(rq, &flags);
 
+	// 返回1（成功唤醒进程）或0（进程没有被唤醒）
 	return success;
 }
 
