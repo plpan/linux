@@ -651,8 +651,12 @@ static inline void __activate_idle_task(task_t *p, runqueue_t *rq)
 	rq->nr_running++;
 }
 
+/**
+ * 更新进程的平均睡眠时间和动态优先级
+ */
 static void recalc_task_prio(task_t *p, unsigned long long now)
 {
+	// p->timestamp中存储的进程进入睡眠状态时刻的时间戳，那么__sleep_time就是进程睡眠时间
 	unsigned long long __sleep_time = now - p->timestamp;
 	unsigned long sleep_time;
 
@@ -661,12 +665,16 @@ static void recalc_task_prio(task_t *p, unsigned long long now)
 	else
 		sleep_time = (unsigned long)__sleep_time;
 
+	// 如果进程确实睡了，那么执行一下检查
 	if (likely(sleep_time > 0)) {
 		/*
 		 * User tasks that sleep a long time are categorised as
 		 * idle and will get just interactive status to stay active &
 		 * prevent them suddenly becoming cpu hogs and starving
 		 * other processes.
+		 * 
+		 * 检查进程是否不是内核线程（根据mm判断？）、是否从TASK_UNINTERRUPTIBLE状态被唤醒、进程连续睡眠时间是否超过极限？
+		 * 如果都满足，就将进程平均睡眠时间设置为900个时钟节拍（最大平均睡眠时间减去标准进程的时间片长度得到的经验值）
 		 */
 		if (p->mm && p->activated != -1 &&
 			sleep_time > INTERACTIVE_SLEEP(p)) {
@@ -676,6 +684,9 @@ static void recalc_task_prio(task_t *p, unsigned long long now)
 			/*
 			 * The lower the sleep avg a task has the more
 			 * rapidly it will rise with sleep time.
+			 * 
+			 * 计算进程原来的平均睡眠时间的bonus值，如果(10 - bonus) > 0，就乘以sleep_time
+			 * 也即当前进程平均睡眠时间越短，它增加的就越快
 			 */
 			sleep_time *= (MAX_BONUS - CURRENT_BONUS(p)) ? : 1;
 
@@ -683,10 +694,14 @@ static void recalc_task_prio(task_t *p, unsigned long long now)
 			 * Tasks waking from uninterruptible sleep are
 			 * limited in their sleep_avg rise as they
 			 * are likely to be waiting on I/O
+			 * 
+			 * 如果进程从TASK_UNINTERRUPTIBLE被唤醒，并且不是内核线程
 			 */
 			if (p->activated == -1 && p->mm) {
+				// 检查进程平均睡眠时间是否大于进程睡眠时间极限值，如果是，设置sleep_time为0（不调整平均睡眠时间）
 				if (p->sleep_avg >= INTERACTIVE_SLEEP(p))
 					sleep_time = 0;
+				// 如果平均睡眠时间加上sleep_time大于进程睡眠时间极限值，就将进程平均睡眠时间设置为该极限值
 				else if (p->sleep_avg + sleep_time >=
 						INTERACTIVE_SLEEP(p)) {
 					p->sleep_avg = INTERACTIVE_SLEEP(p);
@@ -701,14 +716,18 @@ static void recalc_task_prio(task_t *p, unsigned long long now)
 			 * value here, based on ->timestamp. The more time a
 			 * task spends sleeping, the higher the average gets -
 			 * and the higher the priority boost gets as well.
+			 * 
+			 * 把进程睡眠时间加到平均睡眠时间上
 			 */
 			p->sleep_avg += sleep_time;
 
+			// 检查是否大于最大平均睡眠时间（1000个时钟节拍？），如果大于，就减小至最大平均睡眠时间
 			if (p->sleep_avg > NS_MAX_SLEEP_AVG)
 				p->sleep_avg = NS_MAX_SLEEP_AVG;
 		}
 	}
 
+	// 更新进程的动态优先级
 	p->prio = effective_prio(p);
 }
 
