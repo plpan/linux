@@ -30,12 +30,16 @@ typedef struct __wait_queue wait_queue_t;
 typedef int (*wait_queue_func_t)(wait_queue_t *wait, unsigned mode, int sync, void *key);
 int default_wake_function(wait_queue_t *wait, unsigned mode, int sync, void *key);
 
+/**
+ * 等待队列项：对等待任务的抽象
+ * 	等待任务会被抽象成一个wait_queue，然后添加到wait_queue_head中去
+ */
 struct __wait_queue {
-	unsigned int flags;
-#define WQ_FLAG_EXCLUSIVE	0x01
-	struct task_struct * task;
-	wait_queue_func_t func;
-	struct list_head task_list;
+	unsigned int flags;				// 用于控制当前等待的进程是互斥进程还是非互斥进程
+#define WQ_FLAG_EXCLUSIVE	0x01	// 互斥标识
+	struct task_struct * task;		// 进程描述符，新版本内核已经升级为(void *private)
+	wait_queue_func_t func;			// 唤醒函数，默认为default_wake_function
+	struct list_head task_list;		// 指向等待队列双向链表中的地址
 };
 
 struct wait_bit_key {
@@ -48,9 +52,10 @@ struct wait_bit_queue {
 	wait_queue_t wait;
 };
 
+// 等待队列头部
 struct __wait_queue_head {
-	spinlock_t lock;
-	struct list_head task_list;
+	spinlock_t lock;			// 保证等待队列的自旋锁，防止多线程同时修改
+	struct list_head task_list;	// 等待队列，双向链表，存放等待的进程
 };
 typedef struct __wait_queue_head wait_queue_head_t;
 
@@ -64,9 +69,11 @@ typedef struct __wait_queue_head wait_queue_head_t;
 	.func		= default_wake_function,			\
 	.task_list	= { NULL, NULL } }
 
+// 快速初始化等待队列项：注意变量名为name，而task_struct域则为tsk
 #define DECLARE_WAITQUEUE(name, tsk)					\
 	wait_queue_t name = __WAITQUEUE_INITIALIZER(name, tsk)
 
+// 初始化等待队列头的快捷方式
 #define __WAIT_QUEUE_HEAD_INITIALIZER(name) {				\
 	.lock		= SPIN_LOCK_UNLOCKED,				\
 	.task_list	= { &(name).task_list, &(name).task_list } }
@@ -77,6 +84,7 @@ typedef struct __wait_queue_head wait_queue_head_t;
 #define __WAIT_BIT_KEY_INITIALIZER(word, bit)				\
 	{ .flags = word, .bit_nr = bit, }
 
+// 初始化等待队列头：初始化自旋锁（未锁）和双向链表（空）
 static inline void init_waitqueue_head(wait_queue_head_t *q)
 {
 	q->lock = SPIN_LOCK_UNLOCKED;
@@ -147,6 +155,12 @@ int FASTCALL(out_of_line_wait_on_bit(void *, int, int (*)(void *), unsigned));
 int FASTCALL(out_of_line_wait_on_bit_lock(void *, int, int (*)(void *), unsigned));
 wait_queue_head_t *FASTCALL(bit_waitqueue(void *, int));
 
+/**
+ * 这里就是一层封装，真正的唤醒是现在sched.c
+ * 
+ * wake_up与wait_event和wait_event_timeout成对使用
+ * wake_up_interruptible与wait_event_intteruptible和wait_event_intteruptible_timeout成对使用
+ */
 #define wake_up(x)			__wake_up(x, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE, 1, NULL)
 #define wake_up_nr(x, nr)		__wake_up(x, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE, nr, NULL)
 #define wake_up_all(x)			__wake_up(x, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE, 0, NULL)
@@ -161,14 +175,15 @@ do {									\
 	DEFINE_WAIT(__wait);						\
 									\
 	for (;;) {							\
-		prepare_to_wait(&wq, &__wait, TASK_UNINTERRUPTIBLE);	\
-		if (condition)						\
+		prepare_to_wait(&wq, &__wait, TASK_UNINTERRUPTIBLE);	\	// 注意这里是将进程设置为不可中断
+		if (condition)						\						// 如果条件满足，则退出阻塞循环
 			break;						\
-		schedule();						\
+		schedule();						\							// 否则继续阻塞
 	}								\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+// 等待唤醒wq等待队列中的进程，condition条件必须满足，否则阻塞
 #define wait_event(wq, condition) 					\
 do {									\
 	if (condition)	 						\
@@ -181,16 +196,17 @@ do {									\
 	DEFINE_WAIT(__wait);						\
 									\
 	for (;;) {							\
-		prepare_to_wait(&wq, &__wait, TASK_UNINTERRUPTIBLE);	\
-		if (condition)						\
+		prepare_to_wait(&wq, &__wait, TASK_UNINTERRUPTIBLE);	\	// 注意这里是将进程设置为不可中断
+		if (condition)						\						// 如果条件满足，则退出阻塞循环
 			break;						\
-		ret = schedule_timeout(ret);				\
+		ret = schedule_timeout(ret);				\				// 否则继续阻塞，直到超时
 		if (!ret)						\
 			break;						\
 	}								\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+// 如果条件满足，或者阻塞timeout时间，超过超时时间，阻塞返回
 #define wait_event_timeout(wq, condition, timeout)			\
 ({									\
 	long __ret = timeout;						\
@@ -204,10 +220,10 @@ do {									\
 	DEFINE_WAIT(__wait);						\
 									\
 	for (;;) {							\
-		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	\
+		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	\	// 注意这里是将进程设置为可中断
 		if (condition)						\
 			break;						\
-		if (!signal_pending(current)) {				\
+		if (!signal_pending(current)) {				\			// 这里检查是否有信号抵达，如果有就返回ERESTARTSYS错误码
 			schedule();					\
 			continue;					\
 		}							\
@@ -217,6 +233,7 @@ do {									\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+// 可被信号中断
 #define wait_event_interruptible(wq, condition)				\
 ({									\
 	int __ret = 0;							\
@@ -230,11 +247,11 @@ do {									\
 	DEFINE_WAIT(__wait);						\
 									\
 	for (;;) {							\
-		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	\
+		prepare_to_wait(&wq, &__wait, TASK_INTERRUPTIBLE);	\	// 注意这里是将进程设置为可中断
 		if (condition)						\
 			break;						\
-		if (!signal_pending(current)) {				\
-			ret = schedule_timeout(ret);			\
+		if (!signal_pending(current)) {				\			// 首先检查信号是否抵达
+			ret = schedule_timeout(ret);			\			// 如果条件没满足，信号没触发，那就阻塞到超时
 			if (!ret)					\
 				break;					\
 			continue;					\
@@ -245,6 +262,7 @@ do {									\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+// 既可以被信号中断，又可以指定最大阻塞时间
 #define wait_event_interruptible_timeout(wq, condition, timeout)	\
 ({									\
 	long __ret = timeout;						\
@@ -272,6 +290,7 @@ do {									\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+// 与wait_event_interruptible类似，不过这里睡眠的进程是一个互斥进程
 #define wait_event_interruptible_exclusive(wq, condition)		\
 ({									\
 	int __ret = 0;							\

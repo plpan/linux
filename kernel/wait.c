@@ -11,6 +11,9 @@
 #include <linux/wait.h>
 #include <linux/hash.h>
 
+/**
+ * 添加非互斥进程，注意这里是添加到等待队列双向链表的头部
+ */
 void fastcall add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
@@ -22,6 +25,9 @@ void fastcall add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(add_wait_queue);
 
+/**
+ * 添加互斥进程，注意这里是添加到等待队列双向链表的尾部，并且设置WQ_FLAG_EXCLUSIVE标识符
+ */
 void fastcall add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
@@ -33,6 +39,9 @@ void fastcall add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(add_wait_queue_exclusive);
 
+/**
+ * 当进程等待的事件发生时，进程被唤醒，从等待队列中删除进程描述符
+ */
 void fastcall remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;

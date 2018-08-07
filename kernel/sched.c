@@ -2803,11 +2803,14 @@ asmlinkage void __sched schedule(void)
 	}
 	profile_hit(SCHED_PROFILING, __builtin_return_address(0));
 
+// 禁止内核抢占
 need_resched:
 	preempt_disable();
+	// 把当前进程描述符赋给prev (需要理解prev, current, next三者之间的关系)
 	prev = current;
 	release_kernel_lock(prev);
 need_resched_nonpreemptible:
+	// 赋值本地CPU运行队列
 	rq = this_rq();
 
 	/*
@@ -3074,6 +3077,8 @@ static void __wake_up_common(wait_queue_head_t *q, unsigned int mode,
  * @q: the waitqueue
  * @mode: which threads
  * @nr_exclusive: how many wake-one or wake-many threads to wake up
+ * 
+ * 唤醒阻塞在等待队列上的进程
  */
 void fastcall __wake_up(wait_queue_head_t *q, unsigned int mode,
 				int nr_exclusive, void *key)
@@ -3286,6 +3291,11 @@ EXPORT_SYMBOL(wait_for_completion_interruptible_timeout);
 	__remove_wait_queue(q, &wait);			\
 	spin_unlock_irqrestore(&q->lock, flags);
 
+/**
+ * 睡眠函数集
+ * 	将进程添加到等待队列中，并设置好互斥|非互斥标识符，并根据调用schedule|schedule_timeout调度函数
+ * 	接着进程就被挂起，直到条件被满足，就会被操作系统唤醒，并从等待队列中删除
+ */
 void fastcall __sched interruptible_sleep_on(wait_queue_head_t *q)
 {
 	SLEEP_ON_VAR
