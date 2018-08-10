@@ -258,7 +258,9 @@ struct sock {
 	__u8			sk_queue_shrunk;
 	/* three bytes hole, try to pack */
 	void			(*sk_state_change)(struct sock *sk);
+	// 触发条件：1）三次握手建立连接（待验证），2）tcp套接字接收到数据
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
+	// 触发条件：缓冲区状态从full->available
 	void			(*sk_write_space)(struct sock *sk);
 	void			(*sk_error_report)(struct sock *sk);
   	int			(*sk_backlog_rcv)(struct sock *sk,

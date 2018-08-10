@@ -119,7 +119,10 @@
 /* Setup the structure that is used as key for the rb-tree */
 #define EP_SET_FFD(p, f, d) do { (p)->file = (f); (p)->fd = (d); } while (0)
 
-/* Compare rb-tree keys */
+/* 
+ * Compare rb-tree keys 
+ * rbn比较函数，优先比较file文件指针内存地址，如果相同，则比较文件描述符FD
+ */
 #define EP_CMP_FFD(p1, p2) ((p1)->file > (p2)->file ? +1: \
 			    ((p1)->file < (p2)->file ? -1: (p1)->fd - (p2)->fd))
 
@@ -153,8 +156,8 @@
 
 
 struct epoll_filefd {
-	struct file *file;
-	int fd;
+	struct file *file; // 指向目标文件描述符的结构体指针
+	int fd;            // 目标文件描述符
 };
 
 /*
@@ -210,21 +213,22 @@ struct eventpoll {
 };
 
 /* Wait structure used by the poll hooks */
+// ep_ptable_queue_proc回调函数使用的结构体
 struct eppoll_entry {
 	/* List header used to link this structure to the "struct epitem" */
-	struct list_head llink;
+	struct list_head llink; // 连接到epi
 
 	/* The "base" pointer is set to the container "struct epitem" */
-	void *base;
+	void *base;             // 存储epi
 
 	/*
 	 * Wait queue item that will be linked to the target file wait
 	 * queue head.
 	 */
-	wait_queue_t wait;
+	wait_queue_t wait;      // 等待队列项
 
 	/* The wait queue head that linked the "wait" wait queue item */
-	wait_queue_head_t *whead;
+	wait_queue_head_t *whead; // 等待队列头
 };
 
 /*
@@ -272,7 +276,10 @@ struct epitem {
 	unsigned int revents;
 };
 
-/* Wrapper struct used by poll queueing */
+/* 
+ * Wrapper struct used by poll queueing 
+ * 对poll_table的简单封装，这里很重要：第二个字段就是epi成员，可以非常方便地从ep_pqueue中恢复出epi成员
+ */
 struct ep_pqueue {
 	poll_table pt;
 	struct epitem *epi;
@@ -623,6 +630,10 @@ eexit_1:
 /*
  * Implement the event wait interface for the eventpoll file. It is the kernel
  * part of the user space epoll_wait(2).
+ * 
+ * 实现epoll_wait
+ *  很简单：1）参数校验，2）从epfd中恢复出eventpoll数据结果，3）调用ep_poll实现功能
+ *  新版本内核已经就叫做epoll_wait
  */
 asmlinkage long sys_epoll_wait(int epfd, struct epoll_event __user *events,
 			       int maxevents, int timeout)
@@ -659,6 +670,8 @@ asmlinkage long sys_epoll_wait(int epfd, struct epoll_event __user *events,
 	/*
 	 * At this point it is safe to assume that the "private_data" contains
 	 * our own data structure.
+     * 
+     * 注意这里从file->private_data中恢复eventpoll结构成员
 	 */
 	ep = file->private_data;
 
@@ -879,18 +892,30 @@ static void ep_release_epitem(struct epitem *epi)
 /*
  * This is the callback that is used to add our wait queue to the
  * target file wakeup lists.
+ * 
+ * 很关键的一个回调函数，当被监听对象的条件满足时，就回调本函数，如tcp_poll
+ * 注意，这里的wait_queue_head_t等待队列头对象需要被监听对象回传，如tcp的等待队列头sock->sk_sleep
  */
 static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 				 poll_table *pt)
 {
+    // 这里就是简单的指针操作，恢复出epi对象
 	struct epitem *epi = EP_ITEM_FROM_EPQUEUE(pt);
 	struct eppoll_entry *pwq;
 
+    // 分配一个eppoll_entry结构体
 	if (epi->nwait >= 0 && (pwq = PWQ_MEM_ALLOC())) {
+        // 将eppoll_entry->wait的回调函数设置为ep_poll_callback
 		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
 		pwq->whead = whead;
 		pwq->base = epi;
+        /**
+         * 将pwq->wait添加到whead等待队列中，注意这里的whead是由被监听对象传递过来的
+         * 也即当被监听对象条件满足时，就会调用wake_XXX系列函数来唤醒等待队列中等待项
+         * 也即就会唤醒pwq->wait
+         */
 		add_wait_queue(whead, &pwq->wait);
+        // 将pwq->llink添加到双向链表epi->pwqlist中
 		list_add_tail(&pwq->llink, &epi->pwqlist);
 		epi->nwait++;
 	} else {
@@ -919,7 +944,9 @@ static void ep_rbtree_insert(struct eventpoll *ep, struct epitem *epi)
 	rb_insert_color(&epi->rbn, &ep->rbr);
 }
 
-
+/**
+ * 将fd及监听事件注册到ep
+ */
 static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 		     struct file *tfile, int fd)
 {
@@ -929,10 +956,11 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	struct ep_pqueue epq;
 
 	error = -ENOMEM;
+	// 借助内核slab分配器来分配内存
 	if (!(epi = EPI_MEM_ALLOC()))
 		goto eexit_1;
 
-	/* Item initialization follow here ... */
+	/* Item initialization follow here ... 各字段初始化 */
 	EP_RB_INITNODE(&epi->rbn);
 	INIT_LIST_HEAD(&epi->rdllink);
 	INIT_LIST_HEAD(&epi->fllink);
@@ -945,6 +973,7 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	epi->nwait = 0;
 
 	/* Initialize the poll table using the queue callback */
+    // 初始化epq：1）设置epi字段，2）初始化poll_table回调函数为ep_ptable_queue_proc
 	epq.epi = epi;
 	init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);
 
@@ -975,6 +1004,7 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	ep_rbtree_insert(ep, epi);
 
 	/* If the file is already "ready" we drop it inside the ready list */
+    // 如果事件已经就绪了，那就唤醒处理进程吧
 	if ((revents & event->events) && !EP_IS_LINKED(&epi->rdllink)) {
 		list_add_tail(&epi->rdllink, &ep->rdllist);
 
@@ -1202,17 +1232,23 @@ eexit_1:
  * This is the callback that is passed to the wait queue wakeup
  * machanism. It is called by the stored file descriptors when they
  * have events to report.
+ * 
+ * 这个函数也是至关重要的，在ep_ptable_queue_proc函数中，本函数被注册为wait_queue_t的回调函数
+ * 也即当被监听对象条件满足时，ep_poll_callback会被调用
+ * 注意，这里并非一定会唤醒相关进程
  */
 static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *key)
 {
 	int pwake = 0;
 	unsigned long flags;
+    // 简单的指针操作，恢复epi
 	struct epitem *epi = EP_ITEM_FROM_WAIT(wait);
 	struct eventpoll *ep = epi->ep;
 
 	DNPRINTK(3, (KERN_INFO "[%p] eventpoll: poll_callback(%p) epi=%p ep=%p\n",
 		     current, epi->file, epi, ep));
 
+    // 获取自旋锁
 	write_lock_irqsave(&ep->lock, flags);
 
 	/*
@@ -1220,30 +1256,40 @@ static int ep_poll_callback(wait_queue_t *wait, unsigned mode, int sync, void *k
 	 * descriptor to be disabled. This condition is likely the effect of the
 	 * EPOLLONESHOT bit that disables the descriptor when an event is received,
 	 * until the next EPOLL_CTL_MOD will be issued.
+     * 
+     * 验证触发事件是否包含poll事件（本版本）
+     * 验证触发事件是否为用户注册类别（新版本）
 	 */
 	if (!(epi->event.events & ~EP_PRIVATE_BITS))
 		goto is_disabled;
 
 	/* If this file is already in the ready list we exit soon */
-	if (EP_IS_LINKED(&epi->rdllink))
+	if (EP_IS_LINKED(&epi->rdllink)) // 如果已经在epi双链表中【当用户还没来得及处理上次事件】，则无需再次添加
 		goto is_linked;
 
+    // 将epi的就绪队列添加到eventpoll就绪队列
 	list_add_tail(&epi->rdllink, &ep->rdllist);
 
 is_linked:
 	/*
 	 * Wake up ( if active ) both the eventpoll wait list and the ->poll()
 	 * wait list.
+     * 
+     * 唤醒等待队列中还未超时的进程，这些进程都是有sys_epoll_wait添加到等待队列的
+     * 注意这里是为epoll_wait准备
 	 */
 	if (waitqueue_active(&ep->wq))
 		wake_up(&ep->wq);
+    // 注意epoll描述符本身也是可以pollable的
 	if (waitqueue_active(&ep->poll_wait))
 		pwake++;
 
 is_disabled:
+    // 释放自旋锁
 	write_unlock_irqrestore(&ep->lock, flags);
 
 	/* We have to call this outside the lock */
+    // 注意这里是在释放自旋锁之后才唤醒poll_wait，提前唤醒有可能会造成死锁
 	if (pwake)
 		ep_poll_safewake(&psw, &ep->poll_wait);
 
@@ -1333,6 +1379,8 @@ static int ep_collect_ready_items(struct eventpoll *ep, struct list_head *txlist
  * This function is called without holding the "ep->lock" since the call to
  * __copy_to_user() might sleep, and also f_op->poll() might reenable the IRQ
  * because of the way poll() is traditionally implemented in Linux.
+ * 
+ * 根据txlist，构建返回数据集events
  */
 static int ep_send_events(struct eventpoll *ep, struct list_head *txlist,
 			  struct epoll_event __user *events)
@@ -1406,6 +1454,10 @@ static void ep_reinject_items(struct eventpoll *ep, struct list_head *txlist)
 		 * ep_release_epitem() is going to drop it. Also, if the current
 		 * item is set to have an Edge Triggered behaviour, we don't have
 		 * to push it back either.
+         * 
+         * 注意，水平触发和垂直触发就是在这里实现的
+         * 水平触发的含义就是如果事件还有效，那么就将其再次插入到ep->rdllist中，这样用户下次还可以获取到该事件
+         * 而垂直触发就真的只触发一次，你必须要处理完，直到下一次就绪时，我会在通知你
 		 */
 		if (EP_RB_LINKED(&epi->rbn) && !(epi->event.events & EPOLLET) &&
 		    (epi->revents & epi->event.events) && !EP_IS_LINKED(&epi->rdllink)) {
@@ -1435,6 +1487,7 @@ static void ep_reinject_items(struct eventpoll *ep, struct list_head *txlist)
 
 /*
  * Perform the transfer of events to user space.
+ * 把事件发往用户空间的真正魔法
  */
 static int ep_events_transfer(struct eventpoll *ep,
 			      struct epoll_event __user *events, int maxevents)
@@ -1447,15 +1500,19 @@ static int ep_events_transfer(struct eventpoll *ep,
 	/*
 	 * We need to lock this because we could be hit by
 	 * eventpoll_release_file() and epoll_ctl(EPOLL_CTL_DEL).
+     * 获取信号量
 	 */
 	down_read(&ep->sem);
 
 	/* Collect/extract ready items */
+    // 非常简单，将ep->rdllist中的事件挪至txlist
 	if (ep_collect_ready_items(ep, &txlist, maxevents) > 0) {
 		/* Build result set in userspace */
+        // 构建返回给用户的数据集，从txlist->evnets
 		eventcnt = ep_send_events(ep, &txlist, events);
 
 		/* Reinject ready items into the ready list */
+        // 根据情况，将txlist中的就绪事件重新链回到ep-rdllist
 		ep_reinject_items(ep, &txlist);
 	}
 
@@ -1477,6 +1534,8 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
 	 * Calculate the timeout by checking for the "infinite" value ( -1 )
 	 * and the overflow condition. The passed timeout is in milliseconds,
 	 * that why (t * HZ) / 1000.
+     * 
+     * 超时时间计算：如果没有设置超时，或者超时时间溢出，就设一个最大的超时时间
 	 */
 	jtimeout = timeout == -1 || timeout > (MAX_SCHEDULE_TIMEOUT - 1000) / HZ ?
 		MAX_SCHEDULE_TIMEOUT: (timeout * HZ + 999) / 1000;
@@ -1490,6 +1549,8 @@ retry:
 		 * We don't have any available event to return to the caller.
 		 * We need to sleep here, and we will be wake up by
 		 * ep_poll_callback() when events will become available.
+         * 
+         * 如果没有就绪时间，那么就睡眠吧
 		 */
 		init_waitqueue_entry(&wait, current);
 		add_wait_queue(&ep->wq, &wait);
@@ -1499,6 +1560,8 @@ retry:
 			 * We don't want to sleep if the ep_poll_callback() sends us
 			 * a wakeup in between. That's why we set the task state
 			 * to TASK_INTERRUPTIBLE before doing the checks.
+             * 
+             * 当接收到信号之后，就退出睡眠，返回EINTR
 			 */
 			set_current_state(TASK_INTERRUPTIBLE);
 			if (!list_empty(&ep->rdllist) || !jtimeout)
@@ -1509,9 +1572,11 @@ retry:
 			}
 
 			write_unlock_irqrestore(&ep->lock, flags);
+            // 调度函数，传递参数睡眠时间
 			jtimeout = schedule_timeout(jtimeout);
 			write_lock_irqsave(&ep->lock, flags);
 		}
+        // 要么时间就绪、要么超时、要么接收到信号，那么就退出睡眠状态
 		remove_wait_queue(&ep->wq, &wait);
 
 		set_current_state(TASK_RUNNING);
@@ -1526,11 +1591,16 @@ retry:
 	 * Try to transfer events to user space. In case we get 0 events and
 	 * there's still timeout left over, we go trying again in search of
 	 * more luck.
+     * 
+     * 如果没有就绪事件、但是还没有超时，那么就进入睡眠等待
+     * 如果有就绪事件，就调用ep_events_transfer发往用户空间
 	 */
 	if (!res && eavail &&
 	    !(res = ep_events_transfer(ep, events, maxevents)) && jtimeout)
 		goto retry;
 
+    // 最终，如果有就绪事件，就返回0，否则返回EINTR
+    // 用户空间代码，如果接收到0，那么就可以根据ep->rdllist中获取就绪队列，并进行对应的处理（如读、写）
 	return res;
 }
 

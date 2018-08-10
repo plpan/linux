@@ -19,9 +19,13 @@ struct poll_table_struct;
 typedef void (*poll_queue_proc)(struct file *, wait_queue_head_t *, struct poll_table_struct *);
 
 typedef struct poll_table_struct {
-	poll_queue_proc qproc;
+	poll_queue_proc qproc; // 回调函数
 } poll_table;
 
+/**
+ * 这里poll_wait就是简单调用poll_table的回调函数
+ * 如果是epoll调用，那么回调函数就是ep_ptable_queue_proc (fs/eventpoll.c)
+ */
 static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
 {
 	if (p && wait_address)
