@@ -16,8 +16,8 @@
  * nr_file rlimit, so it's safe to set up a ridiculously high absolute
  * upper limit on files-per-process.
  *
- * Some programs (notably those using select()) may have to be 
- * recompiled to take full advantage of the new limits..  
+ * Some programs (notably those using select()) may have to be
+ * recompiled to take full advantage of the new limits..
  */
 
 /* Fixed constants first: */
@@ -79,7 +79,7 @@ extern int dir_notify_enable;
 #define SEL_EX		4
 
 /* public flags for file_system_type */
-#define FS_REQUIRES_DEV 1 
+#define FS_REQUIRES_DEV 1
 #define FS_BINARY_MOUNTDATA 2
 #define FS_REVAL_DOT	16384	/* Check the paths ".", ".." for staleness */
 #define FS_ODD_RENAME	32768	/* Temporary stuff; will go away as soon
@@ -424,62 +424,62 @@ static inline int mapping_writably_mapped(struct address_space *mapping)
 #endif
 
 struct inode {
-	struct hlist_node	i_hash;
-	struct list_head	i_list;
-	struct list_head	i_sb_list;
-	struct list_head	i_dentry;
-	unsigned long		i_ino;
-	atomic_t		i_count;
-	umode_t			i_mode;
-	unsigned int		i_nlink;
-	uid_t			i_uid;
-	gid_t			i_gid;
-	dev_t			i_rdev;
-	loff_t			i_size;
+	struct hlist_node	i_hash;     // 哈希表，所有inode都在哈希表中，以加快查找
+	struct list_head	i_list;     // 索引节点链表，当新建inode时，会依次将其添加到i_list、i_sb_list、i_dentry链表中
+	struct list_head	i_sb_list;  // 超级快链表
+	struct list_head	i_dentry;   // 目录项链表
+	unsigned long		i_ino;      // inode标号，在inode位图中的索引
+	atomic_t		i_count;        // 引用计数
+	umode_t			i_mode;         // 文件打开模式
+	unsigned int		i_nlink;    // inode的硬链接数
+	uid_t			i_uid;          // inode对应文件的uid
+	gid_t			i_gid;          // inode对应文件的gid
+	dev_t			i_rdev;         // 设备标识
+	loff_t			i_size;         // 文件大小
 	struct timespec		i_atime;
 	struct timespec		i_mtime;
 	struct timespec		i_ctime;
-	unsigned int		i_blkbits;
-	unsigned long		i_blksize;
-	unsigned long		i_version;
-	unsigned long		i_blocks;
-	unsigned short          i_bytes;
-	unsigned char		i_sock;
+	unsigned int		i_blkbits;  // 块大小位数
+	unsigned long		i_blksize;  // 块大小
+	unsigned long		i_version;  // 版本号
+	unsigned long		i_blocks;   // 块数
+	unsigned short          i_bytes;// 已经使用的字节数
+	unsigned char		i_sock;     // 套接字
 	spinlock_t		i_lock;	/* i_blocks, i_bytes, maybe i_size */
 	struct semaphore	i_sem;
 	struct rw_semaphore	i_alloc_sem;
-	struct inode_operations	*i_op;
-	struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */
-	struct super_block	*i_sb;
-	struct file_lock	*i_flock;
-	struct address_space	*i_mapping;
-	struct address_space	i_data;
+	struct inode_operations	*i_op;  // inode函数表
+	struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */   // file函数表
+	struct super_block	*i_sb;      // 超级快指针
+	struct file_lock	*i_flock;   // 文件锁
+	struct address_space	*i_mapping; // 地址映射
+	struct address_space	i_data; // 设备地址映射
 #ifdef CONFIG_QUOTA
 	struct dquot		*i_dquot[MAXQUOTAS];
 #endif
 	/* These three should probably be a union */
-	struct list_head	i_devices;
-	struct pipe_inode_info	*i_pipe;
-	struct block_device	*i_bdev;
-	struct cdev		*i_cdev;
+	struct list_head	i_devices;  // 块设备链表
+	struct pipe_inode_info	*i_pipe;// 管道信息
+	struct block_device	*i_bdev;    // 块设备驱动
+	struct cdev		*i_cdev;        // 字符设备驱动
 	int			i_cindex;
 
-	__u32			i_generation;
+	__u32			i_generation;   // 索引节点版本号
 
 #ifdef CONFIG_DNOTIFY
 	unsigned long		i_dnotify_mask; /* Directory notify events */
 	struct dnotify_struct	*i_dnotify; /* for directory notifications */
 #endif
 
-	unsigned long		i_state;
+	unsigned long		i_state;    // 文件状态位
 	unsigned long		dirtied_when;	/* jiffies of first dirtying */
 
-	unsigned int		i_flags;
+	unsigned int		i_flags;    // 状态位
 
-	atomic_t		i_writecount;
+	atomic_t		i_writecount;   // 写入计数
 	void			*i_security;
 	union {
-		void		*generic_ip;
+		void		*generic_ip;    // 特殊信息
 	} u;
 #ifdef __NEED_I_SIZE_ORDERED
 	seqcount_t		i_size_seqcount;
@@ -610,10 +610,10 @@ extern spinlock_t files_lock;
 
 #define	MAX_NON_LFS	((1UL<<31) - 1)
 
-/* Page cache limit. The filesystems should put that into their s_maxbytes 
-   limits, otherwise bad things can happen in VM. */ 
+/* Page cache limit. The filesystems should put that into their s_maxbytes
+   limits, otherwise bad things can happen in VM. */
 #if BITS_PER_LONG==32
-#define MAX_LFS_FILESIZE	(((u64)PAGE_CACHE_SIZE << (BITS_PER_LONG-1))-1) 
+#define MAX_LFS_FILESIZE	(((u64)PAGE_CACHE_SIZE << (BITS_PER_LONG-1))-1)
 #elif BITS_PER_LONG==64
 #define MAX_LFS_FILESIZE 	0x7fffffffffffffffUL
 #endif
@@ -991,7 +991,7 @@ struct super_operations {
 	void (*destroy_inode)(struct inode *);
 
 	void (*read_inode) (struct inode *);
-  
+
    	void (*dirty_inode) (struct inode *);
 	int (*write_inode) (struct inode *, int);
 	void (*put_inode) (struct inode *);
@@ -1389,7 +1389,7 @@ extern int may_open(struct nameidata *, int, int);
 
 extern int kernel_read(struct file *, unsigned long, char *, unsigned long);
 extern struct file * open_exec(const char *);
- 
+
 /* fs/dcache.c -- generic fs support functions */
 extern int is_subdir(struct dentry *, struct dentry *);
 extern ino_t find_inode_number(struct dentry *, struct qstr *);
@@ -1419,7 +1419,7 @@ extern void unlock_new_inode(struct inode *);
 static inline struct inode *iget(struct super_block *sb, unsigned long ino)
 {
 	struct inode *inode = iget_locked(sb, ino);
-	
+
 	if (inode && (inode->i_state & I_NEW)) {
 		sb->s_op->read_inode(inode);
 		unlock_new_inode(inode);
@@ -1480,9 +1480,9 @@ extern void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping);
 extern ssize_t generic_file_direct_IO(int rw, struct kiocb *iocb,
 	const struct iovec *iov, loff_t offset, unsigned long nr_segs);
-extern ssize_t generic_file_readv(struct file *filp, const struct iovec *iov, 
+extern ssize_t generic_file_readv(struct file *filp, const struct iovec *iov,
 	unsigned long nr_segs, loff_t *ppos);
-ssize_t generic_file_writev(struct file *filp, const struct iovec *iov, 
+ssize_t generic_file_writev(struct file *filp, const struct iovec *iov,
 			unsigned long nr_segs, loff_t *ppos);
 extern loff_t no_llseek(struct file *file, loff_t offset, int origin);
 extern loff_t generic_file_llseek(struct file *file, loff_t offset, int origin);
