@@ -81,31 +81,31 @@ struct dcookie_struct;
 #define DNAME_INLINE_LEN_MIN 36
 
 struct dentry {
-	atomic_t d_count;
-	unsigned int d_flags;		/* protected by d_lock */
+	atomic_t d_count;   // 目录项引用计数
+	unsigned int d_flags;		/* protected by d_lock */ // 目录项标记
 	spinlock_t d_lock;		/* per dentry lock */
 	struct inode *d_inode;		/* Where the name belongs to - NULL is
-					 * negative */
+					 * negative */ // 指向的inode结构，如果没有指向任何inode，则为NULL
 	/*
 	 * The next three fields are touched by __d_lookup.  Place them here
 	 * so they all fit in a 16-byte range, with 16-byte alignment.
 	 */
-	struct dentry *d_parent;	/* parent directory */
-	struct qstr d_name;
+	struct dentry *d_parent;	/* parent directory */ // 父目录项
+	struct qstr d_name; // 文件名
 
-	struct list_head d_lru;		/* LRU list */
-	struct list_head d_child;	/* child of parent list */
-	struct list_head d_subdirs;	/* our children */
-	struct list_head d_alias;	/* inode alias list */
+	struct list_head d_lru;		/* LRU list */ // 未使用链表指针，以LRU算法链接
+	struct list_head d_child;	/* child of parent list */ // 目录中目录项链表
+	struct list_head d_subdirs;	/* our children */ // 针对目录，表示子目录目录项对象的链表
+	struct list_head d_alias;	/* inode alias list */ // 别名目录项链表
 	unsigned long d_time;		/* used by d_revalidate */
-	struct dentry_operations *d_op;
-	struct super_block *d_sb;	/* The root of the dentry tree */
-	void *d_fsdata;			/* fs-specific data */
+	struct dentry_operations *d_op; // 目录项操作函数集
+	struct super_block *d_sb;	/* The root of the dentry tree */ // 超级块指针
+	void *d_fsdata;			/* fs-specific data */ // 文件系统相关数据
  	struct rcu_head d_rcu;
 	struct dcookie_struct *d_cookie; /* cookie, if any */
-	struct hlist_node d_hash;	/* lookup hash list */	
-	int d_mounted;
-	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */
+	struct hlist_node d_hash;	/* lookup hash list */ // 散列表表项指针，缓存的最近使用的目录项是使用散列表来存储
+	int d_mounted; // 文件系统的挂载点
+	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */ // 存放短文件名
 };
 
 struct dentry_operations {
@@ -154,7 +154,7 @@ d_iput:		no		no		no       yes
       */
 
 #define DCACHE_REFERENCED	0x0008  /* Recently used, don't discard. */
-#define DCACHE_UNHASHED		0x0010	
+#define DCACHE_UNHASHED		0x0010
 
 extern spinlock_t dcache_lock;
 
@@ -236,7 +236,7 @@ extern void d_rehash(struct dentry *);
  * This adds the entry to the hash queues and initializes @inode.
  * The entry was actually filled in earlier during d_alloc().
  */
- 
+
 static inline void d_add(struct dentry *entry, struct inode *inode)
 {
 	d_instantiate(entry, inode);
@@ -271,7 +271,7 @@ extern struct dentry * __d_lookup(struct dentry *, struct qstr *);
 extern int d_validate(struct dentry *, struct dentry *);
 
 extern char * d_path(struct dentry *, struct vfsmount *, char *, int);
-  
+
 /* Allocation counts.. */
 
 /**
@@ -279,14 +279,14 @@ extern char * d_path(struct dentry *, struct vfsmount *, char *, int);
  *	@dentry: dentry to get a reference to
  *
  *	Given a dentry or %NULL pointer increment the reference count
- *	if appropriate and return the dentry. A dentry will not be 
+ *	if appropriate and return the dentry. A dentry will not be
  *	destroyed when it has references. dget() should never be
  *	called for dentries with zero reference counter. For these cases
  *	(preferably none, functions in dcache.c are sufficient for normal
  *	needs and they take necessary precautions) you should hold dcache_lock
  *	and call dget_locked() instead of dget().
  */
- 
+
 static inline struct dentry *dget(struct dentry *dentry)
 {
 	if (dentry) {
@@ -304,7 +304,7 @@ extern struct dentry * dget_locked(struct dentry *);
  *
  *	Returns true if the dentry passed is not currently hashed.
  */
- 
+
 static inline int d_unhashed(struct dentry *dentry)
 {
 	return (dentry->d_flags & DCACHE_UNHASHED);
