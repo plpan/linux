@@ -574,32 +574,32 @@ struct file_ra_state {
 #define RA_FLAG_INCACHE 0x02	/* file is already in cache */
 
 struct file {
-	struct list_head	f_list;
-	struct dentry		*f_dentry;
-	struct vfsmount         *f_vfsmnt;
-	struct file_operations	*f_op;
-	atomic_t		f_count;
-	unsigned int 		f_flags;
-	mode_t			f_mode;
+	struct list_head	f_list;         // 文件对象链表
+	struct dentry		*f_dentry;      // 目录项
+	struct vfsmount         *f_vfsmnt;  // 安装的文件系统
+	struct file_operations	*f_op;      // 文件操作函数表
+	atomic_t		f_count;            // 文件对象的引用计数，dup,dup2,fork都能够增加该引用计数
+	unsigned int 		f_flags;        // 打开文件时指定的标志，对应open系统调用的flags，如非阻塞等
+	mode_t			f_mode;             // 对文件的读写模式，对应open系统调用的mode
 	int			f_error;
-	loff_t			f_pos;
-	struct fown_struct	f_owner;
-	unsigned int		f_uid, f_gid;
-	struct file_ra_state	f_ra;
+	loff_t			f_pos;              // 文件读写位置
+	struct fown_struct	f_owner;        // 通过信号进行IO事件通知
+	unsigned int		f_uid, f_gid;   // 文件所属用户ID和组ID
+	struct file_ra_state	f_ra;       // 文件预读状态，当预读文件时，该结构除了prev_page（默认-1）和ra_pages（最大预读量），其他字段都为0
 
 	size_t			f_maxcount;
-	unsigned long		f_version;
+	unsigned long		f_version;      // 记录文件版本号
 	void			*f_security;
 
 	/* needed for tty driver, and maybe others */
-	void			*private_data;
+	void			*private_data;      // 存储一些状态信息，如epoll就是使用这个字段来存储struct eventpoll对象
 
 #ifdef CONFIG_EPOLL
 	/* Used by fs/eventpoll.c to link all the hooks to this file */
 	struct list_head	f_ep_links;
 	spinlock_t		f_ep_lock;
 #endif /* #ifdef CONFIG_EPOLL */
-	struct address_space	*f_mapping;
+	struct address_space	*f_mapping; // 地址映射
 };
 extern spinlock_t files_lock;
 #define file_list_lock() spin_lock(&files_lock);
